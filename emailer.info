@@ -1,0 +1,7 @@
+name = Emailer
+description = Email mass sender
+version = 7.x-1.x
+core = 7.x
+
+dependencies[] = mimemail
+dependencies[] = mailsystem

@@ -1,0 +1,360 @@
+<?php
+
+/**
+ * @file
+ * Main code for module.
+ */
+
+/**
+ * Implements hook_menu().
+ */
+function emailer_menu() {
+  $items['admin/config/emailer'] = array(
+    'title' => 'Emailer',
+    'weight' => 0,
+    'page callback' => 'system_admin_menu_block_page',
+    'access arguments' => array('access administration pages'),
+    'file' => 'system.admin.inc',
+    'file path' => drupal_get_path('module', 'system'),
+    'position' => 'right', // or left
+  );
+
+  $items['admin/config/emailer/send'] = array(
+    'title' => 'Emailer - Send mails',
+    'type' => MENU_NORMAL_ITEM,
+    'access arguments' => array('access administration pages'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('emailer_send_form'),
+  );
+
+  $items['admin/config/emailer/import'] = array(
+    'title' => 'Import database',
+    'type' => MENU_NORMAL_ITEM,
+    'access arguments' => array('access administration pages'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('emailer_import_form'),
+  );
+
+  return $items;
+}
+
+/**
+ * Emailer send form.
+ * @return array
+ */
+function emailer_send_form($form, &$form_state) {
+  $form['from'] = array(
+    '#title' => t('From'),
+    '#type' => 'textfield',
+    '#default_value' => variable_get('site_mail', ''),
+    '#required' => TRUE,
+  );
+
+  $form['subject'] = array(
+    '#title' => t('Subject'),
+    '#type' => 'textfield',
+    '#required' => TRUE,
+  );
+
+  $form['message'] = array(
+    '#title' => t('Message'),
+    '#type' => 'textarea',
+    '#description' => t('The message body.'),
+    '#required' => TRUE,
+  );
+
+  /*$form['attachments'] = array(
+    '#type' => 'managed_file',
+    '#title' => t('Attachments'),
+    '#progress_indicator' => 'bar',
+    '#upload_location' => 'public://emailer/'
+  );*/
+
+  $form['html'] = array(
+    '#title' => t('HTML support'),
+    '#type' => 'checkbox',
+    '#default_value' => TRUE,
+    '#description' => t('If checked, mail will support HTML tags.'),
+  );
+
+  $form['testing'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Send test mail'),
+    '#collapsible' => FALSE,
+    '#collapsed' => FALSE,
+  );
+
+  $form['testing']['test'] = array(
+    '#title' => t('Send test'),
+    '#type' => 'checkbox',
+    '#default_value' => FALSE,
+    '#description' => t('If checked, mail will send only on address entered below.'),
+  );
+
+  $form['testing']['test_mail'] = array(
+    '#title' => t('E-mail'),
+    '#description' => t('You can enter multiply email addresses separated by comma.'),
+    '#type' => 'textfield',
+    '#required' => FALSE,
+  );
+
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Send'),
+  );
+
+  return $form;
+}
+
+/**
+ * Validates form for send mails.
+ * @param $form
+ * @param $form_state
+ */
+function emailer_send_form_validate($form, &$form_state) {
+  if ($form_state['values']['test'] && empty($form_state['values']['test_mail'])) {
+    form_set_error('test_mail');
+  }
+}
+
+/**
+ * Form sumission.
+ * @param $form
+ * @param $form_state
+ */
+function emailer_send_form_submit($form, &$form_state) {
+  // If test email.
+  if ($form_state['values']['test']) {
+    drupal_mail(
+      'emailer',
+      'emailer_send',
+      $form_state['values']['test_mail'],
+      language_default(),
+      array(
+        'from' => $form_state['values']['from'],
+        'subject' => $form_state['values']['subject'],
+        'message' => $form_state['values']['message'],
+        'html' => $form_state['values']['html'],
+        'attachments' => NULL,
+      ),
+      $form_state['values']['from'],
+      TRUE
+    );
+
+    drupal_set_message(t('Test E-mail successfully send.'));
+  }
+  else {
+    $query = db_select('emailer_list', 'e');
+    $query->fields('e', array('email'));
+    $result = $query->execute();
+
+    // Add emails to opertions list.
+    foreach ($result as $row) {
+      $operations[] = array(
+        'emailer_send_batch_operation',
+        array($row->email, $form_state)
+      );
+    }
+
+    $batch = array(
+      'operations' => $operations,
+      'finished' => 'emailer_send_batch_finished',
+      'title' => t('Send emails.'),
+      'init_message' => t('Prepare data.'),
+      'progress_message' => t('Already send @current of @total.'),
+      'error_message' => t('Something goes wrong.'),
+    );
+
+    batch_set($batch);
+  }
+}
+
+/**
+ * Batch send iteration.
+ * @param $email
+ * @param $context
+ */
+function emailer_send_batch_operation($email, $form_state, &$context) {
+  $from = $form_state['values']['from'];
+  $subject = $form_state['values']['subject'];
+  $message = $form_state['values']['message'];
+  $html = $form_state['values']['html'];
+  $attachments = NULL;
+
+  // Save attachment.
+  if (!empty($form_state['values']['attachments'])) {
+    // Load the file via file.fid.
+    $file = file_load($form_state['values']['attachments']);
+    // Change status to permanent.
+    $file->status = FILE_STATUS_PERMANENT;
+    // Save.
+    file_save($file);
+    // Record that the module (in this example, user module) is using the file.
+    file_usage_add($file, 'emailer', 'emailer_send', 1);
+    $attachments = file_load($file->fid);
+  }
+
+  drupal_mail(
+    'emailer',
+    'emailer_send',
+    $email,
+    language_default(),
+    array(
+      'from' => $from,
+      'subject' => $subject,
+      'message' => $message,
+      'html' => $html,
+      'attachments' => $attachments,
+    ),
+    $from,
+    TRUE
+  );
+}
+
+/**
+ * End of batch sending.
+ * @param $success
+ * @param $results
+ * @param $operations
+ */
+function emailer_send_batch_finished($success, $results, $operations) {
+  if ($success) {
+    drupal_set_message(t('Sending completed.'));
+  }
+  else {
+    drupal_set_message(t('Ended with errors'), 'error');
+  }
+}
+
+/**
+ * Implements hook_mail().
+ */
+function emailer_mail($key, &$message, $params) {
+  switch ($key) {
+    case 'emailer_send':
+      // Make HTML works.
+      if ($params['html']) {
+        $message['headers']['Content-Type'] = 'text/html; charset=UTF-8; format=flowed';
+      }
+      $message['subject'] = $params['subject'];
+      $message['body'] = $params['message'];
+      // Attachment.
+      if (isset($params['attachment'])) {
+        $message['params']['attachments'][] = $params['attachment'];
+      }
+  }
+}
+
+/**
+ * Form for import database.
+ *
+ * @param $form
+ * @param $form_state
+ * @return array
+ */
+function emailer_import_form($form, &$form_state) {
+  $form['file'] = array(
+    '#type' => 'file',
+    '#title' => t('Import file'),
+  );
+
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Send'),
+  );
+
+  return $form;
+}
+
+/**
+ * Validate import file.
+ *
+ * @param $form
+ * @param $form_state
+ */
+function emailer_import_form_validate($form, &$form_state) {
+  // Allowed extensions.
+  $validators = array(
+    'file_validate_extensions' => array(
+      'csv',
+    )
+  );
+
+  if ($file = file_save_upload('file', $validators, 'public://')) {
+    $form_state['values']['file'] = $file;
+  }
+  else {
+    form_set_error('file', 'File not uploaded.');
+  }
+}
+
+/**
+ * Submit and import values to database.
+ *
+ * @param $form
+ * @param $form_state
+ */
+function emailer_import_form_submit($form, &$form_state) {
+  // First at all we remove old data.
+  db_truncate('emailer_list')->execute();
+
+  $file_path = file_create_url($form_state['values']['file']->uri);
+  // Import new data.
+  if (($handle = fopen($file_path, 'r')) !== FALSE) {
+    $count = 0;
+    // If first row with titles.
+    //$header = fgetcsv($handle);
+
+    // Going line-by-line.
+    while (($data = fgetcsv($handle)) !== FALSE) {
+      emailer_add_email($data[0]);
+      $count++;
+      unset($data);
+    }
+    fclose($handle);
+
+    drupal_set_message(t('E-mail addresses have been successfully added. The number of addresses added: @number', array('@number' => $count)));
+  }
+}
+
+/**
+ * Add record to database.
+ *
+ * @param $email
+ * @param array $data
+ * @return bool|int
+ */
+function emailer_add_email($email, $data = array()) {
+  $data = array(
+    'email' => $email,
+    'data' => $data,
+  );
+
+  try {
+    drupal_write_record('emailer_list', $data);
+  }
+  catch (Exception $e) {
+    if ($e->errorInfo[1] == 1062) {
+      drupal_set_message('В базе имеется несколько упоминаний E-mail адреса: ' . $email, 'warning');
+    }
+  }
+}
+
+function emailer_get_email_list() {
+  $result = db_select('emailer_list', 'el')
+    ->fields('el')
+    ->execute();
+
+  $values = array();
+
+  while ($record = $result->fetchAssoc()) {
+    $values[] = $record;
+  }
+
+  if (empty($values)) {
+    return FALSE;
+  }
+  else {
+    return $values;
+  }
+}

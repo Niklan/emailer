@@ -1,0 +1,40 @@
+<?php
+
+/**
+ * @file
+ * Install file form emailer module.
+ */
+
+function emailer_schema() {
+  $schema['emailer_list'] = array(
+    'description' => 'This base contains list for sending.',
+    'fields' => array(
+      'sid' => array(
+        'description' => 'The primary identifier for a recipient.',
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'email' => array(
+        'description' => 'The recipient email.',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'data' => array(
+        'description' => 'Additional data..',
+        'type' => 'blob',
+        'size' => 'big',
+        'not null' => TRUE,
+        'serialize' => TRUE,
+      ),
+    ),
+    'unique keys' => array(
+      'email' => array('email'),
+    ),
+    'primary key' => array('sid'),
+  );
+
+  return $schema;
+}
